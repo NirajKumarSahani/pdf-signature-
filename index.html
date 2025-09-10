@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Signature Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF.js: Renders PDF pages -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <!-- pdf-lib: Modifies and creates PDFs -->
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    <!-- Signature Pad: For drawing signatures -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/signature_pad/1.5.3/signature_pad.min.js"></script>
+    <!-- Draggabilly: For making elements draggable -->
+    <script src="https://unpkg.com/draggabilly@3/dist/draggabilly.pkgd.min.js"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        #loader {
+            border-top-color: #3498db;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #pdf-viewer { position: relative; }
+        #pdf-canvas { display: block; }
+        #signature-preview {
+            position: absolute;
+            cursor: move;
+            border: 2px dashed #007bff;
+            border-radius: 4px;
+            user-select: none;
+        }
+        .signature-pad-canvas {
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            cursor: crosshair;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="w-full max-w-7xl mx-auto p-4 md:p-6">
+        <header class="text-center mb-6 bg-white p-6 rounded-xl shadow-md">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">PDF Signature Tool</h1>
+            <p class="text-gray-500 mt-2">Easily sign your PDF documents online.</p>
+        </header>
+
+        <!-- UPLOAD SCREEN -->
+        <div id="upload-container" class="w-full bg-white rounded-xl shadow-lg p-8 text-center">
+             <label for="pdf-upload" class="cursor-pointer group block w-full border-2 border-dashed border-gray-300 rounded-lg p-10 hover:border-blue-500 transition duration-300">
+                <div class="flex flex-col items-center justify-center">
+                     <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-gray-400 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    <p class="mt-4 text-lg text-gray-600">Drag & drop your PDF here or</p>
+                    <p class="mt-2 text-blue-600 font-semibold">Click to select a file</p>
+                </div>
+            </label>
+            <input type="file" id="pdf-upload" class="hidden" accept=".pdf">
+        </div>
+
+        <!-- EDITOR SCREEN -->
+        <div id="editor-container" class="hidden">
+            <div class="bg-white p-4 rounded-xl shadow-lg mb-6 flex flex-wrap items-center justify-center gap-4 sticky top-4 z-20">
+                 <!-- Page Navigation -->
+                <div class="flex items-center gap-2">
+                    <button id="prev-page" class="p-2 rounded-md hover:bg-gray-200">&lt;</button>
+                    <span id="page-num" class="text-sm">Page</span>
+                    <span>/</span>
+                    <span id="page-count" class="text-sm"></span>
+                    <button id="next-page" class="p-2 rounded-md hover:bg-gray-200">&gt;</button>
+                </div>
+                 <button id="add-signature-btn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 shadow-md">Add Signature</button>
+                 <button id="save-pdf-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 shadow-md">Apply & Download PDF</button>
+                 <button id="reset-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Start Over</button>
+            </div>
+
+            <div id="pdf-viewer" class="flex justify-center bg-gray-200 p-4 rounded-lg">
+                <canvas id="pdf-canvas"></canvas>
+                <!-- Signature preview will be injected here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- SIGNATURE MODAL -->
+    <div id="signature-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-xl">
+            <h2 class="text-xl font-bold mb-4">Create Your Signature</h2>
+            <!-- TABS -->
+            <div class="border-b border-gray-200">
+                <nav class="-mb-px flex space-x-6" id="signature-tabs">
+                    <button data-tab="draw" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm text-blue-600 border-blue-500">Draw</button>
+                    <button data-tab="type" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300">Type</button>
+                </nav>
+            </div>
+            <!-- PANELS -->
+            <div class="py-4">
+                <div id="draw-panel" class="tab-panel">
+                    <canvas class="signature-pad-canvas w-full h-48 bg-gray-50" id="signature-pad"></canvas>
+                    <button id="clear-signature-btn" class="text-sm text-gray-600 hover:text-gray-800 mt-2">Clear</button>
+                </div>
+                <div id="type-panel" class="tab-panel hidden">
+                    <input type="text" id="type-signature-input" class="w-full border border-gray-300 p-2 rounded-lg text-2xl" placeholder="Type your name">
+                    <div class="mt-2">
+                        <label>Font:</label>
+                        <select id="font-family-select" class="border p-1 rounded">
+                            <option value="Caveat" style="font-family: 'Caveat', cursive;">Caveat</option>
+                            <option value="Dancing Script" style="font-family: 'Dancing Script', cursive;">Dancing Script</option>
+                            <option value="Pacifico" style="font-family: 'Pacifico', cursive;">Pacifico</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-end gap-4 mt-4">
+                <button id="cancel-signature-btn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg">Cancel</button>
+                <button id="save-signature-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Save Signature</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center">
+        <div class="flex flex-col items-center">
+            <div id="loader" class="w-16 h-16 border-4 border-gray-200 rounded-full"></div>
+            <p class="text-white text-xl mt-4">Processing...</p>
+        </div>
+    </div>
+
+    <!-- Google Fonts for typed signature -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Caveat&family=Dancing+Script&family=Pacifico&display=swap" rel="stylesheet">
+
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
+
+        const uploadContainer = document.getElementById('upload-container');
+        const editorContainer = document.getElementById('editor-container');
+        const pdfUploadInput = document.getElementById('pdf-upload');
+        const pdfViewer = document.getElementById('pdf-viewer');
+        const pdfCanvas = document.getElementById('pdf-canvas');
+        const prevPageBtn = document.getElementById('prev-page');
+        const nextPageBtn = document.getElementById('next-page');
+        const pageNumSpan = document.getElementById('page-num');
+        const pageCountSpan = document.getElementById('page-count');
+        const addSignatureBtn = document.getElementById('add-signature-btn');
+        const savePdfBtn = document.getElementById('save-pdf-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        
+        // Modal elements
+        const signatureModal = document.getElementById('signature-modal');
+        const signaturePadCanvas = document.getElementById('signature-pad');
+        const clearSignatureBtn = document.getElementById('clear-signature-btn');
+        const cancelSignatureBtn = document.getElementById('cancel-signature-btn');
+        const saveSignatureBtn = document.getElementById('save-signature-btn');
+        const typeSignatureInput = document.getElementById('type-signature-input');
+        const fontFamilySelect = document.getElementById('font-family-select');
+        const signatureTabs = document.getElementById('signature-tabs');
+        
+        let pdfDoc = null;
+        let currentPageNum = 1;
+        let pdfFile = null;
+        let signaturePad = null;
+        let signaturePreviewDraggie = null;
+        let scale = 1.5;
+
+        // --- Event Listeners ---
+        pdfUploadInput.addEventListener('change', handleFileSelect);
+        prevPageBtn.addEventListener('click', onPrevPage);
+        nextPageBtn.addEventListener('click', onNextPage);
+        addSignatureBtn.addEventListener('click', openSignatureModal);
+        resetBtn.addEventListener('click', resetUI);
+        savePdfBtn.addEventListener('click', applySignatureAndSave);
+
+        // --- Modal Listeners ---
+        cancelSignatureBtn.addEventListener('click', () => signatureModal.classList.add('hidden'));
+        clearSignatureBtn.addEventListener('click', () => signaturePad.clear());
+        saveSignatureBtn.addEventListener('click', saveSignature);
+        
+        signatureTabs.addEventListener('click', (e) => {
+            if (e.target.classList.contains('tab-btn')) {
+                const tab = e.target.dataset.tab;
+                document.querySelectorAll('.tab-btn').forEach(btn => {
+                    btn.classList.toggle('text-blue-600', btn.dataset.tab === tab);
+                    btn.classList.toggle('border-blue-500', btn.dataset.tab === tab);
+                    btn.classList.toggle('text-gray-500', btn.dataset.tab !== tab);
+                    btn.classList.toggle('border-transparent', btn.dataset.tab !== tab);
+                });
+                 document.querySelectorAll('.tab-panel').forEach(panel => {
+                    panel.classList.toggle('hidden', panel.id !== `${tab}-panel`);
+                 });
+                 if (tab === 'draw' && signaturePad) signaturePad.fromData(signaturePad.toData()); // Redraw
+            }
+        });
+
+        typeSignatureInput.addEventListener('input', (e) => {
+            e.target.style.fontFamily = fontFamilySelect.value;
+        });
+        fontFamilySelect.addEventListener('change', (e) => {
+             typeSignatureInput.style.fontFamily = e.target.value;
+        });
+
+        // --- Core Functions ---
+        async function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file || file.type !== 'application/pdf') return;
+            pdfFile = file;
+
+            showLoader(true);
+            try {
+                const loadingTask = pdfjsLib.getDocument(URL.createObjectURL(pdfFile));
+                pdfDoc = await loadingTask.promise;
+                pageCountSpan.textContent = pdfDoc.numPages;
+                currentPageNum = 1;
+                await renderPage(currentPageNum);
+                uploadContainer.classList.add('hidden');
+                editorContainer.classList.remove('hidden');
+            } catch (error) {
+                console.error("Error loading PDF:", error);
+                alert("Could not load PDF. It may be corrupted or protected.");
+                resetUI();
+            } finally {
+                showLoader(false);
+            }
+        }
+        
+        async function renderPage(num) {
+            const page = await pdfDoc.getPage(num);
+            const viewport = page.getViewport({ scale: scale });
+            const context = pdfCanvas.getContext('2d');
+            
+            pdfCanvas.height = viewport.height;
+            pdfCanvas.width = viewport.width;
+
+            await page.render({ canvasContext: context, viewport: viewport }).promise;
+            pageNumSpan.textContent = num;
+            
+            // Reposition existing signature if any
+            const signaturePreview = document.getElementById('signature-preview');
+            if(signaturePreview) {
+                signaturePreview.style.visibility = signaturePreview.dataset.pageNum == num ? 'visible' : 'hidden';
+            }
+        }
+
+        function onPrevPage() {
+            if (currentPageNum <= 1) return;
+            currentPageNum--;
+            renderPage(currentPageNum);
+        }
+
+        function onNextPage() {
+            if (currentPageNum >= pdfDoc.numPages) return;
+            currentPageNum++;
+            renderPage(currentPageNum);
+        }
+
+        function openSignatureModal() {
+            signatureModal.classList.remove('hidden');
+            if (!signaturePad) {
+                signaturePad = new SignaturePad(signaturePadCanvas);
+            }
+            const ratio =  Math.max(window.devicePixelRatio || 1, 1);
+            signaturePadCanvas.width = signaturePadCanvas.offsetWidth * ratio;
+            signaturePadCanvas.height = signaturePadCanvas.offsetHeight * ratio;
+            signaturePadCanvas.getContext("2d").scale(ratio, ratio);
+            signaturePad.clear();
+        }
+
+        function saveSignature() {
+            if (signaturePad.isEmpty() && !typeSignatureInput.value) {
+                alert("Please provide a signature first.");
+                return;
+            }
+
+            let dataURL;
+            const activeTab = document.querySelector('.tab-btn[data-tab].text-blue-600').dataset.tab;
+
+            if (activeTab === 'draw') {
+                dataURL = signaturePad.toDataURL('image/png');
+            } else {
+                 dataURL = createTextImage(typeSignatureInput.value, fontFamilySelect.value);
+            }
+            
+            addSignatureToPage(dataURL);
+            signatureModal.classList.add('hidden');
+        }
+
+        function createTextImage(text, fontFamily) {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            const fontSize = 50;
+            tempCtx.font = `${fontSize}px ${fontFamily}`;
+            const textMetrics = tempCtx.measureText(text);
+            
+            tempCanvas.width = textMetrics.width;
+            tempCanvas.height = fontSize * 1.2;
+            
+            tempCtx.font = `${fontSize}px ${fontFamily}`;
+            tempCtx.fillStyle = "#000";
+            tempCtx.textBaseline = 'middle';
+            tempCtx.fillText(text, 0, tempCanvas.height / 2);
+
+            return tempCanvas.toDataURL('image/png');
+        }
+
+
+        function addSignatureToPage(imageDataUrl) {
+            let existingPreview = document.getElementById('signature-preview');
+            if (existingPreview) existingPreview.remove();
+
+            const img = document.createElement('img');
+            img.src = imageDataUrl;
+            img.id = 'signature-preview';
+            img.dataset.pageNum = currentPageNum;
+            img.style.left = '50px';
+            img.style.top = '50px';
+            img.style.width = '150px'; // Default width
+
+            pdfViewer.appendChild(img);
+            
+            signaturePreviewDraggie = new Draggabilly(img, {
+                containment: pdfCanvas
+            });
+        }
+        
+        async function applySignatureAndSave() {
+            const signaturePreview = document.getElementById('signature-preview');
+            if (!signaturePreview || !pdfFile) {
+                alert("Please add a signature before saving.");
+                return;
+            }
+
+            showLoader(true, "Applying signature...");
+
+            try {
+                const { PDFDocument } = PDFLib;
+                const existingPdfBytes = await pdfFile.arrayBuffer();
+                const pdfDocToModify = await PDFDocument.load(existingPdfBytes);
+                const pages = pdfDocToModify.getPages();
+                
+                const targetPageNum = parseInt(signaturePreview.dataset.pageNum);
+                const targetPage = pages[targetPageNum - 1];
+                
+                const pngImageBytes = await fetch(signaturePreview.src).then(res => res.arrayBuffer());
+                const pngImage = await pdfDocToModify.embedPng(pngImageBytes);
+                
+                const { width: pageW, height: pageH } = targetPage.getSize();
+                
+                const scaleX = pageW / pdfCanvas.clientWidth;
+                const scaleY = pageH / pdfCanvas.clientHeight;
+
+                const sigX = signaturePreviewDraggie.position.x * scaleX;
+                const sigY = pageH - ((signaturePreviewDraggie.position.y + signaturePreview.clientHeight) * scaleY);
+                const sigW = signaturePreview.clientWidth * scaleX;
+                const sigH = signaturePreview.clientHeight * scaleY;
+
+                targetPage.drawImage(pngImage, {
+                    x: sigX,
+                    y: sigY,
+                    width: sigW,
+                    height: sigH,
+                });
+
+                const pdfBytes = await pdfDocToModify.save();
+                
+                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `signed-${pdfFile.name}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+            } catch(error) {
+                console.error("Failed to save PDF:", error);
+                alert("An error occurred while saving the PDF.");
+            } finally {
+                showLoader(false);
+            }
+        }
+
+        function resetUI() {
+            pdfDoc = null;
+            currentPageNum = 1;
+            pdfFile = null;
+            pdfUploadInput.value = '';
+            editorContainer.classList.add('hidden');
+            uploadContainer.classList.remove('hidden');
+            let existingPreview = document.getElementById('signature-preview');
+            if (existingPreview) existingPreview.remove();
+        }
+
+        function showLoader(show, message = "Processing...") {
+            document.getElementById('loading-overlay').classList.toggle('hidden', !show);
+        }
+    </script>
+
+</body>
+</html>
